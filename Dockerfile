@@ -23,4 +23,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV TZ=Asia/Kolkata
 
-CMD ["python", "main.py"]
+RUN chmod +x start.sh
+
+EXPOSE $PORT
+
+CMD ["./start.sh"]
