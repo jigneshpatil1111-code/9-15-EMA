@@ -67,23 +67,24 @@ class MarketFeedManager:
                     if sid not in self._tick_store:
                         self._tick_store[sid] = TickData(security_id=sid)
 
-            # Build subscription list in batches of 100
-            instrument_list = [
-                (inst["exchange_segment"], str(inst["security_id"]))
-                for inst in instruments
-            ]
+            from dhanhq import DhanContext
+            context = DhanContext(settings.DHAN_CLIENT_ID, settings.DHAN_ACCESS_TOKEN)
+
+            # Build subscription list in batches of 100 for v2 dict format
+            nse_instruments = [str(inst["security_id"]) for inst in instruments if "NSE" in inst.get("exchange_segment", "NSE")]
+            
+            sub_dict = {}
+            if nse_instruments:
+                sub_dict[MarketFeed.NSE] = nse_instruments[:100]
 
             self._feed = MarketFeed(
-                client_id=settings.DHAN_CLIENT_ID,
-                access_token=settings.DHAN_ACCESS_TOKEN,
-                instrument_list=instrument_list[:100],
-                feed_type="ticker",
+                context,
+                sub_dict,
+                on_connect=self._handle_connect,
+                on_message=self._handle_message,
+                on_close=self._handle_close,
+                on_error=self._handle_error,
             )
-
-            self._feed.on_connect = self._handle_connect
-            self._feed.on_message = self._handle_message
-            self._feed.on_close = self._handle_close
-            self._feed.on_error = self._handle_error
 
             # Start in background thread
             self._feed_thread = threading.Thread(
@@ -145,11 +146,12 @@ class MarketFeedManager:
         for i in range(0, len(remaining), batch_size):
             batch = remaining[i : i + batch_size]
             try:
-                sub_list = [
-                    (inst["exchange_segment"], str(inst["security_id"]))
-                    for inst in batch
-                ]
-                self._feed.subscribe(sub_list)
+                nse_batch = [str(inst["security_id"]) for inst in batch if "NSE" in inst.get("exchange_segment", "NSE")]
+                sub_dict = {}
+                if nse_batch:
+                    sub_dict[MarketFeed.NSE] = nse_batch
+                if sub_dict:
+                    self._feed.subscribe_symbols(sub_dict)
                 time.sleep(0.2)
             except Exception as e:
                 logger.error(f"Subscription batch error: {e}")

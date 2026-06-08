@@ -155,6 +155,8 @@ cython_debug/
 logs/
 data/*.db
 data/*.csv
-reports/
+reports/*.csv
+reports/*.pdf
+reports/*.xlsx
 *.db
 *.csv
