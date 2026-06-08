@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: scanner_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: intraday_scanner
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: scanner_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations/init_schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d intraday_scanner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Scanner Service
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scanner_main
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://scanner:scanner_password@postgres:5432/intraday_scanner
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - scanner_net
+
+  # Streamlit Dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: scanner_dashboard
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://scanner:scanner_password@postgres:5432/intraday_scanner
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - scanner_net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  scanner_net:
+    driver: bridge
