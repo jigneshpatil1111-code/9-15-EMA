@@ -95,6 +95,33 @@ class Settings(BaseSettings):
     # ── Scanner ───────────────────────────────────────────────────
     SCAN_INTERVAL_SECONDS: int = Field(default=300, description="Scan interval in seconds")
 
+    # ── Order Execution ──────────────────────────────────────────
+    PAPER_TRADING: bool = Field(
+        default=True,
+        description="Paper trading mode: True = simulated orders, False = live orders",
+    )
+    USE_SUPER_ORDERS: bool = Field(
+        default=True,
+        description="Use Super Orders (Entry + SL + Target in one call)",
+    )
+
+    # ── Risk Management ──────────────────────────────────────────
+    MAX_DAILY_LOSS: float = Field(
+        default=5000.0, description="Max daily loss in INR before kill switch activates"
+    )
+    MAX_POSITION_SIZE: float = Field(
+        default=50000.0, description="Max position value in INR per trade"
+    )
+    MAX_OPEN_POSITIONS: int = Field(
+        default=3, description="Max concurrent open positions"
+    )
+    CAPITAL_PER_TRADE: float = Field(
+        default=25000.0, description="Capital allocated per trade in INR"
+    )
+    MAX_TRADES_PER_DAY: int = Field(
+        default=10, description="Max number of trades per day"
+    )
+
     # ── Logging ───────────────────────────────────────────────────
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
     LOG_FILE: str = Field(default="logs/scanner.log", description="Log file path")

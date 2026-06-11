@@ -7,6 +7,7 @@ Maintains an in-memory tick store keyed by security_id.
 import logging
 import threading
 import time
+import asyncio
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -56,7 +57,7 @@ class MarketFeedManager:
             True if connection started successfully.
         """
         try:
-            from dhanhq import MarketFeed
+            from dhanhq import MarketFeed, DhanContext
 
             self._subscribed_instruments = instruments
 
@@ -67,19 +68,17 @@ class MarketFeedManager:
                     if sid not in self._tick_store:
                         self._tick_store[sid] = TickData(security_id=sid)
 
-            from dhanhq import DhanContext
             context = DhanContext(settings.DHAN_CLIENT_ID, settings.DHAN_ACCESS_TOKEN)
 
-            # Build subscription list in batches of 100 for v2 dict format
+            # Build initial subscription list for v2 format (list of tuples)
             nse_instruments = [str(inst["security_id"]) for inst in instruments if "NSE" in inst.get("exchange_segment", "NSE")]
-            
-            sub_dict = {}
+            initial_sub_list = []
             if nse_instruments:
-                sub_dict[MarketFeed.NSE] = nse_instruments[:100]
+                initial_sub_list = [(MarketFeed.NSE, sid) for sid in nse_instruments[:100]]
 
             self._feed = MarketFeed(
                 context,
-                sub_dict,
+                initial_sub_list,
                 on_connect=self._handle_connect,
                 on_message=self._handle_message,
                 on_close=self._handle_close,
@@ -103,13 +102,14 @@ class MarketFeedManager:
             logger.error("dhanhq package not installed. Run: pip install dhanhq")
             return False
         except Exception as e:
-            logger.error(f"Failed to start MarketFeed: {e}")
+            logger.error(f"Failed to start MarketFeed: {e}", exc_info=True)
             return False
 
     def _run_feed(self):
         """Run the WebSocket feed in the background thread."""
         try:
-            self._feed.connect()
+            # DhanHQ v2 connect() is async
+            asyncio.run(self._feed.connect())
         except Exception as e:
             logger.error(f"MarketFeed connection error: {e}")
             self._connected = False
@@ -135,10 +135,11 @@ class MarketFeedManager:
 
         logger.error("Max reconnect attempts reached. MarketFeed offline.")
 
-    def _handle_connect(self, message):
+    def _handle_connect(self, ws):
         """Called when WebSocket connection is established."""
+        from dhanhq import MarketFeed
         self._connected = True
-        logger.info(f"MarketFeed connected: {message}")
+        logger.info(f"MarketFeed connected.")
 
         # Subscribe remaining instruments in batches of 100
         remaining = self._subscribed_instruments[100:]
@@ -147,16 +148,14 @@ class MarketFeedManager:
             batch = remaining[i : i + batch_size]
             try:
                 nse_batch = [str(inst["security_id"]) for inst in batch if "NSE" in inst.get("exchange_segment", "NSE")]
-                sub_dict = {}
                 if nse_batch:
-                    sub_dict[MarketFeed.NSE] = nse_batch
-                if sub_dict:
-                    self._feed.subscribe_symbols(sub_dict)
+                    sub_list = [(MarketFeed.NSE, sid) for sid in nse_batch]
+                    ws.subscribe_symbols(sub_list)
                 time.sleep(0.2)
             except Exception as e:
                 logger.error(f"Subscription batch error: {e}")
 
-    def _handle_message(self, message):
+    def _handle_message(self, ws, message):
         """
         Called for each incoming tick from the WebSocket.
         Updates the in-memory tick store.
@@ -190,12 +189,12 @@ class MarketFeedManager:
         except Exception as e:
             logger.error(f"Error processing tick message: {e}")
 
-    def _handle_close(self, message):
+    def _handle_close(self, ws, message=None):
         """Called when WebSocket connection closes."""
         self._connected = False
         logger.warning(f"MarketFeed connection closed: {message}")
 
-    def _handle_error(self, error):
+    def _handle_error(self, ws, error):
         """Called on WebSocket error."""
         logger.error(f"MarketFeed error: {error}")
 
@@ -233,7 +232,8 @@ class MarketFeedManager:
         """Disconnect the WebSocket feed."""
         try:
             if self._feed:
-                self._feed.disconnect()
+                # DhanHQ v2 disconnect is also async
+                asyncio.run(self._feed.disconnect())
             self._connected = False
             logger.info("MarketFeed disconnected.")
         except Exception as e:

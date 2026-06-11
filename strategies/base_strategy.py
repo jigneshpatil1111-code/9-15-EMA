@@ -49,6 +49,14 @@ class Signal:
     exit_reason: str = ""
     entry_candle_count: int = 0  # Track candles since entry for breakeven logic
 
+    # Order tracking (populated by order executor)
+    order_id: str = ""
+    sl_order_id: str = ""
+    target_order_id: str = ""
+    quantity: int = 0  # Number of shares traded
+    is_paper_trade: bool = False
+
+
 
 class BaseStrategy(ABC):
     """

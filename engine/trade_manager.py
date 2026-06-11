@@ -2,6 +2,10 @@
 Trade Manager.
 Tracks open signals, monitors target/stop-loss hits,
 enforces breakeven exit logic, and handles forced intraday close.
+
+Now integrated with:
+- OrderExecutor: Places actual (or paper) orders via Dhan API
+- RiskManager: Enforces position sizing and loss limits
 """
 
 import logging
@@ -36,32 +40,122 @@ class TradeManager:
         self._closed_trades: List[Signal] = []
         self._lock = threading.Lock()
         self._trade_db = None  # Set externally to trade_repository
+        self._order_executor = None  # Set externally
+        self._risk_manager = None  # Set externally
 
     def set_trade_repository(self, repo):
         """Set the database repository for persisting trades."""
         self._trade_db = repo
 
-    def add_trade(self, signal: Signal):
+    def set_order_executor(self, executor):
+        """Set the order executor for placing trades."""
+        self._order_executor = executor
+
+    def set_risk_manager(self, risk_mgr):
+        """Set the risk manager for trade validation."""
+        self._risk_manager = risk_mgr
+
+    def add_trade(self, signal: Signal) -> bool:
         """
-        Add a new trade signal to active monitoring.
+        Add a new trade signal to active monitoring and place the order.
+
+        Flow:
+        1. Check risk limits (via RiskManager)
+        2. Calculate quantity (via RiskManager)
+        3. Place order (via OrderExecutor)
+        4. Track the trade
 
         Args:
             signal: The trade signal to track.
+
+        Returns:
+            True if trade was successfully added and order placed.
         """
         with self._lock:
             if signal.symbol in self._open_trades:
                 logger.warning(
                     f"Trade already open for {signal.symbol}. Skipping duplicate."
                 )
-                return
+                return False
+
+            # ── Risk Check ──
+            if self._risk_manager:
+                allowed, reason = self._risk_manager.can_take_trade(signal)
+                if not allowed:
+                    logger.info(
+                        f"🚫 Trade BLOCKED by Risk Manager for {signal.symbol}: {reason}"
+                    )
+                    return False
+
+                # Calculate quantity based on capital allocation
+                signal.quantity = self._risk_manager.calculate_quantity(signal)
+                if signal.quantity <= 0:
+                    logger.warning(f"Quantity calculated as 0 for {signal.symbol}. Skipping.")
+                    return False
+            else:
+                # Fallback: default quantity of 1 if no risk manager
+                signal.quantity = 1
+
+            # ── Place Order ──
+            order_placed = False
+            if self._order_executor:
+                try:
+                    if getattr(settings, 'USE_SUPER_ORDERS', True):
+                        # Super Order: Entry + SL + Target in one call
+                        result = self._order_executor.place_super_order(
+                            security_id=signal.security_id,
+                            symbol=signal.symbol,
+                            quantity=signal.quantity,
+                            entry_price=signal.entry_price,
+                            stop_loss_price=signal.stop_loss,
+                            target_price=signal.target1,
+                        )
+                    else:
+                        # Regular limit order
+                        result = self._order_executor.place_intraday_buy(
+                            security_id=signal.security_id,
+                            symbol=signal.symbol,
+                            quantity=signal.quantity,
+                            price=signal.entry_price,
+                            order_type="LIMIT",
+                        )
+
+                    if result.success:
+                        signal.order_id = result.order_id
+                        signal.sl_order_id = result.sl_order_id
+                        signal.target_order_id = result.target_order_id
+                        signal.is_paper_trade = result.is_paper
+                        order_placed = True
+                        logger.info(
+                            f"{'📝' if result.is_paper else '✅'} Order placed for "
+                            f"{signal.symbol}: {signal.quantity} shares @ ₹{signal.entry_price:.2f}"
+                        )
+                    else:
+                        logger.error(
+                            f"❌ Order FAILED for {signal.symbol}: {result.message}"
+                        )
+                        return False
+
+                except Exception as e:
+                    logger.error(f"❌ Order placement error for {signal.symbol}: {e}")
+                    return False
+            else:
+                # No order executor — signal-only mode (backward compatible)
+                order_placed = True
+                logger.info(f"Signal-only mode: {signal.symbol} (no order executor)")
 
             signal.status = "active"
             signal.entry_candle_count = 0
             self._open_trades[signal.symbol] = signal
 
+            # Register with risk manager
+            if self._risk_manager:
+                self._risk_manager.register_trade_opened()
+
             logger.info(
-                f"Trade added: {signal.symbol} @ {signal.entry_price} "
-                f"SL: {signal.stop_loss} T1: {signal.target1}"
+                f"Trade added: {signal.symbol} | Qty: {signal.quantity} | "
+                f"Entry: ₹{signal.entry_price} | SL: ₹{signal.stop_loss} | "
+                f"T1: ₹{signal.target1} | {'PAPER' if signal.is_paper_trade else 'LIVE'}"
             )
 
             # Persist to database
@@ -70,6 +164,8 @@ class TradeManager:
                     self._trade_db.insert_trade(signal)
                 except Exception as e:
                     logger.error(f"Failed to persist trade {signal.symbol}: {e}")
+
+            return True
 
     def update_trades(self, ltp_map: Dict[str, float], candles_elapsed: int = 1):
         """
@@ -94,11 +190,11 @@ class TradeManager:
                 if ltp <= trade.stop_loss:
                     trade.exit_price = trade.stop_loss
                     trade.exit_reason = "stop_loss"
-                    trade.pnl = trade.exit_price - trade.entry_price
+                    trade.pnl = (trade.exit_price - trade.entry_price) * max(trade.quantity, 1)
                     symbols_to_close.append(symbol)
                     logger.info(
                         f"STOP LOSS hit: {symbol} @ {trade.stop_loss} | "
-                        f"PnL: {trade.pnl:.2f}"
+                        f"PnL: ₹{trade.pnl:.2f}"
                     )
                     continue
 
@@ -106,11 +202,11 @@ class TradeManager:
                 if ltp >= trade.target1:
                     trade.exit_price = trade.target1
                     trade.exit_reason = "target1_hit"
-                    trade.pnl = trade.exit_price - trade.entry_price
+                    trade.pnl = (trade.exit_price - trade.entry_price) * max(trade.quantity, 1)
                     symbols_to_close.append(symbol)
                     logger.info(
                         f"TARGET 1 hit: {symbol} @ {trade.target1} | "
-                        f"PnL: {trade.pnl:.2f}"
+                        f"PnL: ₹{trade.pnl:.2f}"
                     )
                     continue
 
@@ -118,11 +214,11 @@ class TradeManager:
                 if ltp >= trade.target2:
                     trade.exit_price = trade.target2
                     trade.exit_reason = "target2_hit"
-                    trade.pnl = trade.exit_price - trade.entry_price
+                    trade.pnl = (trade.exit_price - trade.entry_price) * max(trade.quantity, 1)
                     symbols_to_close.append(symbol)
                     logger.info(
                         f"TARGET 2 hit: {symbol} @ {trade.target2} | "
-                        f"PnL: {trade.pnl:.2f}"
+                        f"PnL: ₹{trade.pnl:.2f}"
                     )
                     continue
 
@@ -164,12 +260,26 @@ class TradeManager:
                 ltp = ltp_map.get(symbol, trade.entry_price)
                 trade.exit_price = ltp if ltp > 0 else trade.entry_price
                 trade.exit_reason = "forced_eod_close"
-                trade.pnl = trade.exit_price - trade.entry_price
+                trade.pnl = (trade.exit_price - trade.entry_price) * trade.quantity
+
+                # Place sell order for forced close
+                if self._order_executor and trade.quantity > 0:
+                    try:
+                        self._order_executor.place_intraday_sell(
+                            security_id=trade.security_id,
+                            symbol=trade.symbol,
+                            quantity=trade.quantity,
+                            price=trade.exit_price,
+                            order_type="MARKET",
+                        )
+                    except Exception as e:
+                        logger.error(f"Force close sell order error for {symbol}: {e}")
+
                 self._close_trade(symbol)
 
                 logger.info(
-                    f"FORCED CLOSE: {symbol} @ {trade.exit_price} | "
-                    f"PnL: {trade.pnl:.2f}"
+                    f"FORCED CLOSE: {symbol} | Qty: {trade.quantity} | "
+                    f"Exit: ₹{trade.exit_price} | PnL: ₹{trade.pnl:.2f}"
                 )
 
     def _close_trade(self, symbol: str):
@@ -182,6 +292,10 @@ class TradeManager:
             trade.status = "closed"
             trade.exit_time = datetime.now(IST)
             self._closed_trades.append(trade)
+
+            # Register with risk manager
+            if self._risk_manager:
+                self._risk_manager.register_trade_closed(trade.pnl)
 
             # Persist to database
             if self._trade_db:

@@ -136,6 +136,8 @@ def main():
     from engine.sentiment_engine import SentimentEngine
     from engine.scanner import Scanner
     from engine.trade_manager import TradeManager
+    from engine.risk_manager import RiskManager
+    from core.order_executor import OrderExecutor
     from database.trade_repository import TradeRepository
     from telegram_bot.notifier import TelegramNotifier
     from reports.report_generator import ReportGenerator
@@ -147,9 +149,24 @@ def main():
         instruments=instruments,
     )
 
+    # ── Initialize Order Executor ──
+    paper_mode = getattr(settings, 'PAPER_TRADING', True)
+    if isinstance(paper_mode, str):
+        paper_mode = paper_mode.lower() in ('true', '1', 'yes')
+    order_executor = OrderExecutor(paper_trading=paper_mode)
+    if not order_executor.initialize():
+        logger.warning("Order Executor initialization failed. Running in signal-only mode.")
+        order_executor = None
+
+    # ── Initialize Risk Manager ──
+    risk_manager = RiskManager()
+
     trade_manager = TradeManager()
     trade_repo = TradeRepository()
     trade_manager.set_trade_repository(trade_repo)
+    if order_executor:
+        trade_manager.set_order_executor(order_executor)
+    trade_manager.set_risk_manager(risk_manager)
 
     telegram = TelegramNotifier()
 
@@ -180,10 +197,15 @@ def main():
     # ── Step 8: Main Loop ──
     logger.info("=" * 70)
     logger.info("  SCANNER READY — ENTERING MAIN LOOP")
+    logger.info(f"  Mode: {'PAPER TRADING [PAPER]' if (order_executor and order_executor.is_paper_trading) else 'LIVE TRADING [LIVE]'}")
     logger.info(f"  Market Open: {settings.MARKET_OPEN}")
     logger.info(f"  Signal Cutoff: {settings.SIGNAL_CUTOFF}")
     logger.info(f"  Force Exit: {settings.FORCE_EXIT_START} - {settings.FORCE_EXIT_END}")
     logger.info(f"  Scan Interval: {settings.SCAN_INTERVAL_SECONDS}s")
+    risk_status = risk_manager.get_risk_status()
+    logger.info(f"  Capital/Trade: Rs. {risk_status['capital_per_trade']:,.0f}")
+    logger.info(f"  Max Positions: {risk_status['max_open_positions']}")
+    logger.info(f"  Max Daily Loss: Rs. {risk_status['max_daily_loss']:,.0f}")
     logger.info("=" * 70)
 
     # Graceful shutdown handler
@@ -208,6 +230,7 @@ def main():
             # Daily reset
             if current_date != last_date:
                 scanner.reset_daily()
+                risk_manager.reset_daily()
                 last_date = current_date
                 logger.info(f"New trading day: {current_date}")
 
