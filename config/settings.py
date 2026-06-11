@@ -1,142 +1,96 @@
 """
 Central configuration module.
-Loads all settings from environment variables / .env file using Pydantic.
+Loads all settings from environment variables / .env file using standard os.getenv.
 """
 
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings
-from pydantic import Field
-from typing import Optional
 
-
-class Settings(BaseSettings):
+class Settings:
     """Application settings loaded from environment variables."""
 
     # ── Broker: Dhan API ──────────────────────────────────────────
-    DHAN_CLIENT_ID: str = Field(default="", description="Dhan API Client ID")
-    DHAN_ACCESS_TOKEN: str = Field(default="", description="Dhan API Access Token")
+    DHAN_CLIENT_ID: str = os.getenv("DHAN_CLIENT_ID", "")
+    DHAN_ACCESS_TOKEN: str = os.getenv("DHAN_ACCESS_TOKEN", "")
 
     # ── Broker Selection ──────────────────────────────────────────
-    BROKER: str = Field(default="dhan", description="Active broker: dhan, kite, upstox")
+    BROKER: str = os.getenv("BROKER", "dhan")
 
     # ── Kite Connect (fallback) ───────────────────────────────────
-    KITE_API_KEY: str = Field(default="", description="Kite Connect API Key")
-    KITE_API_SECRET: str = Field(default="", description="Kite Connect API Secret")
-    KITE_ACCESS_TOKEN: str = Field(default="", description="Kite Connect Access Token")
+    KITE_API_KEY: str = os.getenv("KITE_API_KEY", "")
+    KITE_API_SECRET: str = os.getenv("KITE_API_SECRET", "")
+    KITE_ACCESS_TOKEN: str = os.getenv("KITE_ACCESS_TOKEN", "")
 
     # ── Upstox (fallback) ─────────────────────────────────────────
-    UPSTOX_API_KEY: str = Field(default="", description="Upstox API Key")
-    UPSTOX_API_SECRET: str = Field(default="", description="Upstox API Secret")
-    UPSTOX_ACCESS_TOKEN: str = Field(default="", description="Upstox Access Token")
+    UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "")
+    UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "")
+    UPSTOX_ACCESS_TOKEN: str = os.getenv("UPSTOX_ACCESS_TOKEN", "")
 
     # ── Telegram ──────────────────────────────────────────────────
-    TELEGRAM_BOT_TOKEN: str = Field(default="", description="Telegram Bot Token")
-    TELEGRAM_CHAT_ID: str = Field(default="", description="Telegram Chat ID")
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
     # ── Database ──────────────────────────────────────────────────
-    DATABASE_URL: str = Field(
-        default="postgresql://scanner:scanner_password@localhost:5432/intraday_scanner",
-        description="PostgreSQL connection string",
-    )
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://scanner:scanner_password@localhost:5432/intraday_scanner")
 
     # ── Trading Hours (IST, HH:MM) ───────────────────────────────
-    MARKET_OPEN: str = Field(default="09:15", description="Market open time IST")
-    SIGNAL_CUTOFF: str = Field(default="14:30", description="No new signals after this time IST")
-    FORCE_EXIT_START: str = Field(default="15:15", description="Force exit start time IST")
-    FORCE_EXIT_END: str = Field(default="15:25", description="Force exit end time IST")
-    REPORT_TIME: str = Field(default="15:30", description="Daily report generation time IST")
+    MARKET_OPEN: str = os.getenv("MARKET_OPEN", "09:15")
+    SIGNAL_CUTOFF: str = os.getenv("SIGNAL_CUTOFF", "14:30")
+    FORCE_EXIT_START: str = os.getenv("FORCE_EXIT_START", "15:15")
+    FORCE_EXIT_END: str = os.getenv("FORCE_EXIT_END", "15:25")
+    REPORT_TIME: str = os.getenv("REPORT_TIME", "15:30")
 
     # ── Market Sentiment ──────────────────────────────────────────
-    SENTIMENT_BULLISH_THRESHOLD: int = Field(
-        default=300,
-        description="Minimum positive stocks for bullish market",
-    )
+    SENTIMENT_BULLISH_THRESHOLD: int = int(os.getenv("SENTIMENT_BULLISH_THRESHOLD", "300"))
 
     # ── Signal Limits ─────────────────────────────────────────────
-    MAX_SIGNALS_PER_SCAN: int = Field(default=5, description="Maximum signals per scan cycle")
+    MAX_SIGNALS_PER_SCAN: int = int(os.getenv("MAX_SIGNALS_PER_SCAN", "5"))
 
     # ── Strategy 1: 1% Setup ─────────────────────────────────────
-    ONE_PCT_MAX_RANGE: float = Field(default=1.0, description="Max first candle range %")
-    ONE_PCT_RR_TARGET1: float = Field(default=3.0, description="Target 1 risk-reward")
-    ONE_PCT_RR_TARGET2: float = Field(default=4.0, description="Target 2 risk-reward")
-    ONE_PCT_BREAKEVEN_CANDLES: int = Field(
-        default=5, description="Exit at breakeven if no move in N candles"
-    )
+    ONE_PCT_MAX_RANGE: float = float(os.getenv("ONE_PCT_MAX_RANGE", "1.0"))
+    ONE_PCT_RR_TARGET1: float = float(os.getenv("ONE_PCT_RR_TARGET1", "3.0"))
+    ONE_PCT_RR_TARGET2: float = float(os.getenv("ONE_PCT_RR_TARGET2", "4.0"))
+    ONE_PCT_BREAKEVEN_CANDLES: int = int(os.getenv("ONE_PCT_BREAKEVEN_CANDLES", "5"))
 
     # ── Strategy 2: 9/15 EMA Pullback ────────────────────────────
-    EMA_FAST_PERIOD: int = Field(default=9, description="Fast EMA period")
-    EMA_SLOW_PERIOD: int = Field(default=15, description="Slow EMA period")
-    EMA_PULLBACK_RR_MIN: float = Field(default=2.5, description="Min RR for EMA pullback")
-    EMA_PULLBACK_RR_MAX: float = Field(default=3.0, description="Max RR for EMA pullback")
-    EMA_PULLBACK_RR_TARGET: float = Field(default=2.75, description="Default RR target")
+    EMA_FAST_PERIOD: int = int(os.getenv("EMA_FAST_PERIOD", "9"))
+    EMA_SLOW_PERIOD: int = int(os.getenv("EMA_SLOW_PERIOD", "15"))
+    EMA_PULLBACK_RR_MIN: float = float(os.getenv("EMA_PULLBACK_RR_MIN", "2.5"))
+    EMA_PULLBACK_RR_MAX: float = float(os.getenv("EMA_PULLBACK_RR_MAX", "3.0"))
+    EMA_PULLBACK_RR_TARGET: float = float(os.getenv("EMA_PULLBACK_RR_TARGET", "2.75"))
 
     # ── Quality Filters ───────────────────────────────────────────
-    OVERSIZED_CANDLE_MULTIPLIER: float = Field(
-        default=2.0, description="Candle body > N * avg range = oversized"
-    )
-    VOLUME_AVG_PERIOD: int = Field(default=20, description="Volume averaging lookback period")
-    MIN_LIQUIDITY_LAKHS: float = Field(
-        default=50.0, description="Min liquidity: price * volume in lakhs"
-    )
-    MAX_SPREAD_PCT: float = Field(default=0.5, description="Max bid-ask spread %")
-    MAX_EMA_DISTANCE_PCT: float = Field(
-        default=1.5, description="Max distance from EMA 9 in %"
-    )
-    MAX_CONSECUTIVE_GREEN: int = Field(
-        default=5, description="Momentum exhaustion: max consecutive green candles"
-    )
-    ABNORMAL_CANDLE_MULTIPLIER: float = Field(
-        default=3.0, description="Candle > N * avg range = abnormal"
-    )
-    MIN_RR_ONE_PCT: float = Field(default=3.0, description="Min RR for 1% setup")
-    MIN_RR_EMA_PULLBACK: float = Field(default=2.0, description="Min RR for EMA pullback")
+    OVERSIZED_CANDLE_MULTIPLIER: float = float(os.getenv("OVERSIZED_CANDLE_MULTIPLIER", "2.0"))
+    VOLUME_AVG_PERIOD: int = int(os.getenv("VOLUME_AVG_PERIOD", "20"))
+    MIN_LIQUIDITY_LAKHS: float = float(os.getenv("MIN_LIQUIDITY_LAKHS", "50.0"))
+    MAX_SPREAD_PCT: float = float(os.getenv("MAX_SPREAD_PCT", "0.5"))
+    MAX_EMA_DISTANCE_PCT: float = float(os.getenv("MAX_EMA_DISTANCE_PCT", "1.5"))
+    MAX_CONSECUTIVE_GREEN: int = int(os.getenv("MAX_CONSECUTIVE_GREEN", "5"))
+    ABNORMAL_CANDLE_MULTIPLIER: float = float(os.getenv("ABNORMAL_CANDLE_MULTIPLIER", "3.0"))
+    MIN_RR_ONE_PCT: float = float(os.getenv("MIN_RR_ONE_PCT", "3.0"))
+    MIN_RR_EMA_PULLBACK: float = float(os.getenv("MIN_RR_EMA_PULLBACK", "2.0"))
 
     # ── Scanner ───────────────────────────────────────────────────
-    SCAN_INTERVAL_SECONDS: int = Field(default=300, description="Scan interval in seconds")
+    SCAN_INTERVAL_SECONDS: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 
     # ── Order Execution ──────────────────────────────────────────
-    PAPER_TRADING: bool = Field(
-        default=True,
-        description="Paper trading mode: True = simulated orders, False = live orders",
-    )
-    USE_SUPER_ORDERS: bool = Field(
-        default=True,
-        description="Use Super Orders (Entry + SL + Target in one call)",
-    )
+    PAPER_TRADING: bool = os.getenv("PAPER_TRADING", "True").lower() in ("true", "1", "t")
+    USE_SUPER_ORDERS: bool = os.getenv("USE_SUPER_ORDERS", "True").lower() in ("true", "1", "t")
 
     # ── Risk Management ──────────────────────────────────────────
-    MAX_DAILY_LOSS: float = Field(
-        default=5000.0, description="Max daily loss in INR before kill switch activates"
-    )
-    MAX_POSITION_SIZE: float = Field(
-        default=50000.0, description="Max position value in INR per trade"
-    )
-    MAX_OPEN_POSITIONS: int = Field(
-        default=3, description="Max concurrent open positions"
-    )
-    CAPITAL_PER_TRADE: float = Field(
-        default=25000.0, description="Capital allocated per trade in INR"
-    )
-    MAX_TRADES_PER_DAY: int = Field(
-        default=10, description="Max number of trades per day"
-    )
+    MAX_DAILY_LOSS: float = float(os.getenv("MAX_DAILY_LOSS", "5000.0"))
+    MAX_POSITION_SIZE: float = float(os.getenv("MAX_POSITION_SIZE", "50000.0"))
+    MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
+    CAPITAL_PER_TRADE: float = float(os.getenv("CAPITAL_PER_TRADE", "25000.0"))
+    MAX_TRADES_PER_DAY: int = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
 
     # ── Logging ───────────────────────────────────────────────────
-    LOG_LEVEL: str = Field(default="INFO", description="Logging level")
-    LOG_FILE: str = Field(default="logs/scanner.log", description="Log file path")
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FILE: str = os.getenv("LOG_FILE", "logs/scanner.log")
 
     # ── Paths ─────────────────────────────────────────────────────
-    BASE_DIR: str = Field(
-        default=str(Path(__file__).resolve().parent.parent),
-        description="Project root directory",
-    )
-    DATA_DIR: str = Field(default="data", description="Data directory for cached files")
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    BASE_DIR: str = str(Path(__file__).resolve().parent.parent)
+    DATA_DIR: str = os.getenv("DATA_DIR", "data")
 
     # ── Derived helpers ───────────────────────────────────────────
 
